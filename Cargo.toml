@@ -1,0 +1,15 @@
+[package]
+name = "hyprsunrisewatcher"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4.41"
+clap = "4.5.41"
+clio = { version = "0.3.5", features = ["clap", "clap-parse", "pipe"] }
+notify = "8.1.0"
+sunrise = "2.1.0"
+
+
+[target.'cfg(unix)'.dependencies] 
+nix = "0.30.1"
