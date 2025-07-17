@@ -12,7 +12,7 @@ pub struct Scheduler<T: Trigger> {
 }
 
 pub trait Trigger {
-    fn next_event_at(&self, date: DateTime<Utc>) -> (ActionTrigger, DateTime<Utc>);
+    fn next_action_at(&self, date: DateTime<Utc>) -> (String, DateTime<Utc>);
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,8 +33,8 @@ impl ActionTrigger {
     }
 }
 
-impl<T: Trigger> Scheduler<T> {
-    pub fn new<L: Into<T>>(trigger: L) -> Self {
+impl Scheduler<LocationInfo> {
+    pub fn automatic<L: Into<LocationInfo>>(trigger: L) -> Self {
         Self {
             on_dusk: vec![],
             on_sunrise: vec![],
@@ -43,7 +43,8 @@ impl<T: Trigger> Scheduler<T> {
             trigger: trigger.into(),
         }
     }
-
+}
+impl<T: Trigger> Scheduler<T> {
     pub fn add_action(&mut self, trigger: ActionTrigger, action: String) {
         match trigger {
             ActionTrigger::Sunrise => self.on_sunrise.push(action),
@@ -53,7 +54,7 @@ impl<T: Trigger> Scheduler<T> {
         }
     }
 
-    pub fn next_event_at(&self, date: DateTime<Utc>) -> (ActionTrigger, DateTime<Utc>) {
+    pub fn next_event_at(&self, date: DateTime<Utc>) -> (String, DateTime<Utc>) {
         self.trigger.next_event_at(date)
     }
 
@@ -69,6 +70,11 @@ impl<T: Trigger> Scheduler<T> {
 
 pub struct LocationInfo {
     coords: Coordinates,
+}
+impl From<(f64, f64)> for LocationInfo {
+    fn from(value: (f64, f64)) -> Self {
+        Coordinates::new(value.0, value.1).unwrap().into()
+    }
 }
 
 impl Trigger for LocationInfo {

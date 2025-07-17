@@ -12,9 +12,9 @@ use std::{
     vec,
 };
 
-use abstraction::scheduler::{self, Action, ProcessCmd, Scheduler};
+use abstraction::scheduler::{self, LocationInfo, Scheduler};
 use bincode::{Decode, Encode};
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, Utc};
+use chrono::{NaiveTime, TimeDelta, Utc};
 use clap::{Parser, Subcommand};
 use clio::{Input, Output};
 use figment::{
@@ -193,9 +193,7 @@ fn setup_automatic_trigger(
     sender: Sender<Action>,
     is_running: Arc<AtomicBool>,
 ) -> crate::error::Result<JoinHandle<()>> {
-    let mut scheduler = Scheduler::new(Coordinates::new(config.latitude, config.longitude).ok_or(
-        crate::error::Error::InvalidCoordinates(config.latitude, config.longitude),
-    )?);
+    let mut scheduler = Scheduler::automatic((config.latitude, config.longitude));
 
     if !config.on_dawn.is_empty() {
         scheduler.add_action(scheduler::ActionTrigger::Dawn, config.on_dawn.clone());
@@ -213,7 +211,7 @@ fn setup_automatic_trigger(
     Ok(std::thread::spawn(move || {
         while is_running.load(std::sync::atomic::Ordering::SeqCst) {
             let now = Utc::now();
-            let (trigger, at) = scheduler.estimated_next_event_at(now);
+            let (trigger, at) = scheduler.next_event_at(now);
             let duration = at - now;
             if duration.abs() > TimeDelta::seconds(30) {
                 sleep(30);
@@ -231,7 +229,7 @@ fn setup_automatic_trigger(
 }
 
 fn setup_manual_trigger(config: ManualConfig, is_running: Arc<AtomicBool>) -> crate::error::Result<JoinHandle<()>> {
-    let scheduler = Scheduler::new()
+    let scheduler = Scheduler::manual(config.time_stamps)
     Ok(std::thread::spawn(move || {
         while is_running.load(std::sync::atomic::Ordering::SeqCst) {
             let now = Utc::now();
