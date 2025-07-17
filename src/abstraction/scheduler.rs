@@ -1,27 +1,42 @@
-use std::process::Command;
-
 use chrono::{Days, prelude::*};
+use serde::{Deserialize, Serialize};
 use sunrise::{Coordinates, SolarDay, SolarEvent};
 
+use super::config::{Actions, ManualTimeStamp};
+
 pub struct Scheduler<T: Trigger> {
-    on_sunrise: Vec<String>,
-    on_sunset: Vec<String>,
-    on_dusk: Vec<String>,
-    on_dawn: Vec<String>,
+    actions: Actions,
     trigger: T,
 }
 
-pub trait Trigger {
-    fn next_action_at(&self, date: DateTime<Utc>) -> (String, DateTime<Utc>);
+impl<T: Trigger> EventSource for Scheduler<T> {
+    fn next_event_at(&self, date: DateTime<Utc>) -> Option<(String, DateTime<Utc>)> {
+        let trigger = self.trigger.next_action_at(date);
+        match trigger {
+            Some((trigger, time)) => match self.get_action(trigger) {
+                Some(action) => Some((action, time)),
+                None => None,
+            },
+            None => None,
+        }
+    }
+}
+pub trait EventSource {
+    fn next_event_at(&self, date: DateTime<Utc>) -> Option<(String, DateTime<Utc>)>;
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub trait Trigger {
+    fn next_action_at(&self, date: DateTime<Utc>) -> Option<(ActionTrigger, DateTime<Utc>)>;
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ActionTrigger {
     Sunrise,
     Sunset,
     Dusk,
     Dawn,
 }
+
 impl ActionTrigger {
     pub fn next(self) -> Self {
         match self {
@@ -34,37 +49,39 @@ impl ActionTrigger {
 }
 
 impl Scheduler<LocationInfo> {
-    pub fn automatic<L: Into<LocationInfo>>(trigger: L) -> Self {
+    pub fn automatic<L: Into<LocationInfo>>(trigger: L, actions: Actions) -> Self {
         Self {
-            on_dusk: vec![],
-            on_sunrise: vec![],
-            on_sunset: vec![],
-            on_dawn: vec![],
+            actions,
             trigger: trigger.into(),
         }
     }
 }
+
+impl Trigger for Vec<ManualTimeStamp> {
+    fn next_action_at(&self, date: DateTime<Utc>) -> Option<(ActionTrigger, DateTime<Utc>)> {
+        let min = self.iter().min_by(move |a, b| {
+            (a.trigger_time - date.naive_local().time())
+                .cmp(&(a.trigger_time - date.naive_local().time()))
+        });
+        if let Some(m) = min {
+            Some((m.action, Utc::now().with_time(m.trigger_time).unwrap()))
+        } else {
+            None
+        }
+    }
+}
+impl Scheduler<Vec<ManualTimeStamp>> {
+    pub fn manual(time_stamps: Vec<ManualTimeStamp>, actions: Actions) -> Self {
+        Self {
+            actions,
+            trigger: time_stamps,
+        }
+    }
+}
+
 impl<T: Trigger> Scheduler<T> {
-    pub fn add_action(&mut self, trigger: ActionTrigger, action: String) {
-        match trigger {
-            ActionTrigger::Sunrise => self.on_sunrise.push(action),
-            ActionTrigger::Sunset => self.on_sunset.push(action),
-            ActionTrigger::Dusk => self.on_dusk.push(action),
-            ActionTrigger::Dawn => self.on_dawn.push(action),
-        }
-    }
-
-    pub fn next_event_at(&self, date: DateTime<Utc>) -> (String, DateTime<Utc>) {
-        self.trigger.next_event_at(date)
-    }
-
     pub fn get_action(&self, trigger: ActionTrigger) -> Option<String> {
-        match trigger {
-            ActionTrigger::Sunrise => self.on_sunrise.first().cloned(),
-            ActionTrigger::Sunset => self.on_sunset.first().cloned(),
-            ActionTrigger::Dusk => self.on_dusk.first().cloned(),
-            ActionTrigger::Dawn => self.on_dawn.first().cloned(),
-        }
+        self.actions.get(trigger)
     }
 }
 
@@ -78,9 +95,10 @@ impl From<(f64, f64)> for LocationInfo {
 }
 
 impl Trigger for LocationInfo {
-    fn next_event_at(&self, date: DateTime<Utc>) -> (ActionTrigger, DateTime<Utc>) {
+    fn next_action_at(&self, date: DateTime<Utc>) -> Option<(ActionTrigger, DateTime<Utc>)> {
         let interval = self.interval_at(date);
-        (interval.event.next(), interval.end)
+
+        Some((interval.event.next(), interval.end))
     }
 }
 impl LocationInfo {

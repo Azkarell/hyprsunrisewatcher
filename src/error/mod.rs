@@ -15,6 +15,7 @@ pub enum Error {
     JoinError,
     InvalidCoordinates(f64, f64),
     InvalidAction(String),
+    InvalidConfiguration,
 }
 
 impl std::error::Error for Error {}
@@ -34,6 +35,7 @@ impl std::fmt::Display for Error {
                 lat, long
             )),
             Error::InvalidAction(action) => f.write_str(&format!("Invalid action: {}", action)),
+            Error::InvalidConfiguration => f.write_str("Invalid configuration"),
         }
     }
 }
