@@ -3,12 +3,16 @@ use std::process::Command;
 use chrono::{Days, prelude::*};
 use sunrise::{Coordinates, SolarDay, SolarEvent};
 
-pub struct Scheduler {
-    on_sunrise: Vec<Action>,
-    on_sunset: Vec<Action>,
-    on_dusk: Vec<Action>,
-    on_dawn: Vec<Action>,
-    location_info: LocationInfo,
+pub struct Scheduler<T: Trigger> {
+    on_sunrise: Vec<String>,
+    on_sunset: Vec<String>,
+    on_dusk: Vec<String>,
+    on_dawn: Vec<String>,
+    trigger: T,
+}
+
+pub trait Trigger {
+    fn next_event_at(&self, date: DateTime<Utc>) -> (ActionTrigger, DateTime<Utc>);
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -18,20 +22,30 @@ pub enum ActionTrigger {
     Dusk,
     Dawn,
 }
+impl ActionTrigger {
+    pub fn next(self) -> Self {
+        match self {
+            ActionTrigger::Sunrise => ActionTrigger::Sunset,
+            ActionTrigger::Sunset => ActionTrigger::Dusk,
+            ActionTrigger::Dusk => ActionTrigger::Dawn,
+            ActionTrigger::Dawn => ActionTrigger::Sunrise,
+        }
+    }
+}
 
-impl Scheduler {
-    pub fn new<L: Into<LocationInfo>>(location_info: L) -> Self {
+impl<T: Trigger> Scheduler<T> {
+    pub fn new<L: Into<T>>(trigger: L) -> Self {
         Self {
             on_dusk: vec![],
             on_sunrise: vec![],
             on_sunset: vec![],
             on_dawn: vec![],
-            location_info: location_info.into(),
+            trigger: trigger.into(),
         }
     }
 
-    pub fn add_action(&mut self, location_info: ActionTrigger, action: Action) {
-        match location_info {
+    pub fn add_action(&mut self, trigger: ActionTrigger, action: String) {
+        match trigger {
             ActionTrigger::Sunrise => self.on_sunrise.push(action),
             ActionTrigger::Sunset => self.on_sunset.push(action),
             ActionTrigger::Dusk => self.on_dusk.push(action),
@@ -39,23 +53,17 @@ impl Scheduler {
         }
     }
 
-    pub fn estimated_next_event_at(&self, date: DateTime<Utc>) -> DateTime<Utc> {
-        self.location_info.interval_at(date).end
+    pub fn next_event_at(&self, date: DateTime<Utc>) -> (ActionTrigger, DateTime<Utc>) {
+        self.trigger.next_event_at(date)
     }
-}
 
-pub struct Action {
-    command: std::process::Command,
-}
-
-impl From<Command> for Action {
-    fn from(value: Command) -> Self {
-        Self::new(value)
-    }
-}
-impl Action {
-    pub fn new(command: Command) -> Self {
-        Self { command }
+    pub fn get_action(&self, trigger: ActionTrigger) -> Option<String> {
+        match trigger {
+            ActionTrigger::Sunrise => self.on_sunrise.first().cloned(),
+            ActionTrigger::Sunset => self.on_sunset.first().cloned(),
+            ActionTrigger::Dusk => self.on_dusk.first().cloned(),
+            ActionTrigger::Dawn => self.on_dawn.first().cloned(),
+        }
     }
 }
 
@@ -63,6 +71,21 @@ pub struct LocationInfo {
     coords: Coordinates,
 }
 
+impl Trigger for LocationInfo {
+    fn next_event_at(&self, date: DateTime<Utc>) -> (ActionTrigger, DateTime<Utc>) {
+        let interval = self.interval_at(date);
+        (interval.event.next(), interval.end)
+    }
+}
+impl LocationInfo {
+    pub fn new(coords: Coordinates) -> Self {
+        Self { coords }
+    }
+
+    pub fn interval_at(&self, date: DateTime<Utc>) -> Interval {
+        Interval::new(self.coords, date)
+    }
+}
 impl From<Coordinates> for LocationInfo {
     fn from(value: Coordinates) -> Self {
         Self::new(value)
@@ -133,16 +156,6 @@ impl Interval {
 
     pub fn current_event(&self) -> ActionTrigger {
         self.event
-    }
-}
-
-impl LocationInfo {
-    pub fn new(coords: Coordinates) -> Self {
-        Self { coords }
-    }
-
-    pub fn interval_at(&self, date: DateTime<Utc>) -> Interval {
-        Interval::new(self.coords, date)
     }
 }
 

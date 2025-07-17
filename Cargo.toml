@@ -4,10 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-chrono = "0.4.41"
+bincode = { version = "2.0.1", features = ["serde"] }
+chrono = { version = "0.4.41", features = ["serde"] }
 clap = "4.5.41"
 clio = { version = "0.3.5", features = ["clap", "clap-parse", "pipe"] }
+ctrlc = { version = "3.4.7", features = ["termination"] }
+figment = { version = "0.10.19", features = ["parse-value", "toml"] }
 notify = "8.1.0"
+serde = { version = "1.0.219", features = ["derive"] }
 sunrise = "2.1.0"
 
 
