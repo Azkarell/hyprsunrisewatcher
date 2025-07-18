@@ -1,4 +1,4 @@
-use std::{ffi::CString, os::unix::ffi::OsStrExt, path::Path};
+use std::{ffi::CString, path::Path};
 
 use nix::{errno::Errno, libc::mkfifo};
 

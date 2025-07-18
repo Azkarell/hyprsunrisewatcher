@@ -29,6 +29,7 @@ pub struct DaemonState {
 
 impl DaemonState {
     pub fn create_from_config(config: Configuration, args: Args) -> crate::error::Result<Self> {
+        println!("Config: {config:?}");
         Ok(Self { config, args })
     }
 
@@ -50,8 +51,6 @@ impl DaemonState {
 
 struct RunningState {
     pipe_path: PathBuf,
-    translate_thread: JoinHandle<()>,
-    trigger_thread: JoinHandle<()>,
     watcher: Option<INotifyWatcher>,
     sender: Sender<Action>,
     receiver: Receiver<Action>,
@@ -60,8 +59,6 @@ struct RunningState {
 impl RunningState {
     pub fn wait_for_exit(self) {
         drop(self.receiver);
-        let _ = self.translate_thread.join();
-        let _ = self.trigger_thread.join();
         if let Some(mut w) = self.watcher {
             let _ = w.unwatch(&self.pipe_path);
         }
@@ -74,16 +71,14 @@ fn setup_handlers(
 ) -> crate::error::Result<RunningState> {
     let (sender, receiver) = channel();
     let pipe = platform::make_pipe(&config.pipe)?;
-    let translate_thread = start_translate_pipe_events(sender.clone(), pipe);
-    let trigger_thread = setup_trigger(config, sender.clone())?;
+    let _translate_thread = start_translate_pipe_events(sender.clone(), pipe);
+    let _trigger_thread = setup_trigger(config, sender.clone())?;
     let mut watcher = None;
     if config.hot_reload {
         watcher = Some(start_hot_reload(config_path, sender.clone())?);
     }
     Ok(RunningState {
         pipe_path: config.pipe.clone(),
-        translate_thread,
-        trigger_thread,
         watcher,
         sender,
         receiver,
@@ -187,6 +182,7 @@ fn handle_command(
         Action::Disable => config.enabled = false,
         Action::Toggle => config.enabled = !config.enabled,
         Action::ReloadConfig { path } => {
+            println!("Reloading {path}");
             *config = load_config(path)?;
             if config.pipe != state.pipe_path {
                 state = setup_handlers(config.pipe.clone(), config)?

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{fs::canonicalize, path::PathBuf, str::FromStr};
 
 use chrono::NaiveTime;
 use figment::{
@@ -70,10 +70,14 @@ impl Actions {
     }
 }
 pub fn load_config(path: String) -> crate::error::Result<Configuration> {
-    println!("loading: {}", path);
-    let config: Configuration = Figment::new()
-        .merge(Toml::file(path))
+    println!("trying to load {path}");
+    let pb = shellexpand::full(&path)?;
+
+    let figment = Figment::new()
         .merge(Serialized::defaults(Configuration::default()))
-        .extract()?;
+        .merge(Toml::file(&*pb));
+
+    let config = figment.extract()?;
+    println!("loaded: {config:?}");
     Ok(config)
 }

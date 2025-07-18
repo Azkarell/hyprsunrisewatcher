@@ -16,7 +16,11 @@ pub mod platform;
 pub struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
-    #[arg(short, long, default_value = "~/.config/hyprsunrisewatcher/config")]
+    #[arg(
+        short,
+        long,
+        default_value = "~/.config/hyprsunrisewatcher/config.toml"
+    )]
     config: String,
 }
 

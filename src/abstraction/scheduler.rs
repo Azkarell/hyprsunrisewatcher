@@ -13,10 +13,7 @@ impl<T: Trigger> EventSource for Scheduler<T> {
     fn next_event_at(&self, date: DateTime<Utc>) -> Option<(String, DateTime<Utc>)> {
         let trigger = self.trigger.next_action_at(date);
         match trigger {
-            Some((trigger, time)) => match self.get_action(trigger) {
-                Some(action) => Some((action, time)),
-                None => None,
-            },
+            Some((trigger, time)) => self.get_action(trigger).map(|action| (action, time)),
             None => None,
         }
     }
@@ -61,13 +58,9 @@ impl Trigger for Vec<ManualTimeStamp> {
     fn next_action_at(&self, date: DateTime<Utc>) -> Option<(ActionTrigger, DateTime<Utc>)> {
         let min = self.iter().min_by(move |a, b| {
             (a.trigger_time - date.naive_local().time())
-                .cmp(&(a.trigger_time - date.naive_local().time()))
+                .cmp(&(b.trigger_time - date.naive_local().time()))
         });
-        if let Some(m) = min {
-            Some((m.action, Utc::now().with_time(m.trigger_time).unwrap()))
-        } else {
-            None
-        }
+        min.map(|m| (m.action, Utc::now().with_time(m.trigger_time).unwrap()))
     }
 }
 impl Scheduler<Vec<ManualTimeStamp>> {
@@ -116,6 +109,7 @@ impl From<Coordinates> for LocationInfo {
     }
 }
 pub struct Interval {
+    #[allow(dead_code)]
     start: DateTime<Utc>,
     end: DateTime<Utc>,
     event: ActionTrigger,
