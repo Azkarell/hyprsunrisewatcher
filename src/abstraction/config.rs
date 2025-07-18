@@ -8,28 +8,28 @@ use figment::{
 use serde::{Deserialize, Serialize};
 
 use super::scheduler::ActionTrigger;
+pub static SOCKET_NAME: &str = "hyprsunrisewatcher.sock";
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Configuration {
     pub enabled: bool,
     pub manual: Option<ManualConfig>,
     pub automatic: Option<AutomaticConfig>,
-    pub pipe: PathBuf,
     pub actions: Actions,
     pub hot_reload: bool,
+    pub config_path: PathBuf,
 }
 
 impl Default for Configuration {
     fn default() -> Self {
         Self {
+            config_path: "~/.config/hyprsunrisewatcher/config.toml".into(),
             enabled: true,
             manual: Some(ManualConfig {
                 time_stamps: vec![],
             }),
             automatic: None,
             actions: Actions::default(),
-            pipe: PathBuf::from_str("/tmp/hyprsunrisewatcher.pipe")
-                .expect("failed to specify base pipe path"),
             hot_reload: false,
         }
     }
@@ -41,12 +41,12 @@ pub struct ManualTimeStamp {
     pub action: ActionTrigger,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ManualConfig {
     pub time_stamps: Vec<ManualTimeStamp>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AutomaticConfig {
     pub longitude: f64,
     pub latitude: f64,
@@ -70,14 +70,13 @@ impl Actions {
     }
 }
 pub fn load_config(path: String) -> crate::error::Result<Configuration> {
-    println!("trying to load {path}");
     let pb = shellexpand::full(&path)?;
-
     let figment = Figment::new()
         .merge(Serialized::defaults(Configuration::default()))
         .merge(Toml::file(&*pb));
 
-    let config = figment.extract()?;
-    println!("loaded: {config:?}");
+    let mut config: Configuration = figment.extract()?;
+
+    config.config_path = pb.as_ref().into();
     Ok(config)
 }

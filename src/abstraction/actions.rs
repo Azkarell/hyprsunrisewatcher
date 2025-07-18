@@ -9,8 +9,9 @@ pub enum Action {
     Enable,
     Disable,
     Toggle,
-    ReloadConfig { path: String },
+    ReloadConfig,
     Trigger { action: String },
+    Nothing,
 }
 
 impl Display for Action {
@@ -20,7 +21,7 @@ impl Display for Action {
             Action::Enable => f.write_str("Action - Enable"),
             Action::Disable => f.write_str("Action - Disable"),
             Action::Toggle => f.write_str("Action - Toggle"),
-            Action::ReloadConfig { path } => f.write_str(&format!("Action - Relod - {}", path)),
+            Action::ReloadConfig => f.write_str(&format!("Action - Relod ")),
             Action::Trigger { action } => f.write_str(&format!("Action - Trigger - {}", action)),
         }
     }
