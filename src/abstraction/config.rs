@@ -1,4 +1,4 @@
-use std::{fs::canonicalize, path::PathBuf, str::FromStr};
+use std::{fmt::Display, fs::canonicalize, path::PathBuf, str::FromStr};
 
 use chrono::NaiveTime;
 use figment::{
@@ -6,6 +6,7 @@ use figment::{
     providers::{Format, Serialized, Toml},
 };
 use serde::{Deserialize, Serialize};
+use toml_edit::ser::to_string_pretty;
 
 use super::scheduler::ActionTrigger;
 pub static SOCKET_NAME: &str = "hyprsunrisewatcher.sock";
@@ -17,7 +18,32 @@ pub struct Configuration {
     pub automatic: Option<AutomaticConfig>,
     pub actions: Actions,
     pub hot_reload: bool,
-    pub config_path: PathBuf,
+}
+pub static DEFAULT_PATH: &str = "~/.config/hyprsunrisewatcher/config.toml";
+
+impl Configuration {
+    pub(crate) fn load_default() -> crate::error::Result<Configuration> {
+        Self::load(DEFAULT_PATH)
+    }
+
+    pub fn load(path: &str) -> crate::error::Result<Configuration> {
+        let pb = shellexpand::full(path)?;
+
+        let figment = Figment::new()
+            .merge(Serialized::defaults(Configuration::default()))
+            .merge(Toml::file(&*pb));
+
+        let mut config: Configuration = figment.extract()?;
+
+        Ok(config)
+    }
+}
+
+impl Display for Configuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let serialized = to_string_pretty(self).map_err(|_| std::fmt::Error)?;
+        f.write_str(&serialized)
+    }
 }
 
 impl Default for Configuration {
@@ -71,6 +97,7 @@ impl Actions {
 }
 pub fn load_config(path: String) -> crate::error::Result<Configuration> {
     let pb = shellexpand::full(&path)?;
+
     let figment = Figment::new()
         .merge(Serialized::defaults(Configuration::default()))
         .merge(Toml::file(&*pb));

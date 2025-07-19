@@ -1,20 +1,35 @@
+use std::path::PathBuf;
+
 use abstraction::{
     actions::Action,
     config::{Configuration, SOCKET_NAME, load_config},
     daemon::Context,
+    scheduler::ActionTrigger,
 };
+use chrono::{DateTime, Local};
 use clap::{Parser, Subcommand};
-use interprocess::local_socket::{GenericNamespaced, Stream};
+use serde::{Deserialize, Serialize};
 
 pub mod abstraction;
 pub mod error;
 pub mod platform;
 
 #[derive(Parser, Clone)]
-#[command(version, about)]
+#[command(version, about, arg_required_else_help = true)]
 pub struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
+}
+#[derive(Serialize)]
+pub struct EventInfo {
+    at: DateTime<Local>,
+    triggers: ActionTrigger,
+}
+#[derive(Serialize)]
+pub struct Info<'a> {
+    daemon_running: bool,
+    next_event: Option<EventInfo>,
+    configuration: &'a Configuration,
 }
 
 #[derive(Subcommand, Clone, PartialEq, Debug)]
@@ -23,8 +38,18 @@ pub enum Commands {
     Enable,
     Toggle,
     Stop,
+    Start,
     Info,
+    GenerateDefaultConfig {
+        #[arg(
+            short,
+            long,
+            default_value = "~/.config/hyprsunrisewatcher/config.toml"
+        )]
+        path: PathBuf,
+    },
 }
+
 impl Commands {
     fn to_action(&self) -> Action {
         match self {
@@ -33,12 +58,17 @@ impl Commands {
             Commands::Toggle => Action::Toggle,
             Commands::Stop => Action::Stop,
             Commands::Info => Action::Nothing,
+            Commands::GenerateDefaultConfig { path } => {
+                Action::GenerateDefaultConfig { path: path.clone() }
+            }
+            Commands::Start => Action::Nothing,
         }
     }
 }
 
 fn main() -> crate::error::Result<()> {
-    let context = init()?;
+    let config = Configuration::load();
+    let context = Context::create_from_config(config);
     let args = Args::parse();
     context.run(args)
 }

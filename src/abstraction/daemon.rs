@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     io::{self, BufReader},
     path::PathBuf,
     sync::mpsc::{Receiver, Sender, channel},
@@ -21,17 +22,34 @@ use super::{
 
 pub struct Context {
     config: Configuration,
+    config_path: String,
 }
 
 impl Context {
-    pub fn create_from_config(config: Configuration) -> Self {
-        Self { config }
+    pub fn create_from_config(config: Configuration, config_path: String) -> Self {
+        Self {
+            config,
+            config_path,
+        }
+    }
+    fn create_execution_state(&self, args: Args) -> crate::error::Result<AppState> {
+        match args.command {
+            Some(c) => match c {
+                Commands::Disable => self.create_cli(),
+                Commands::Enable => self.create_cli(),
+                Commands::Toggle => self.create_cli(),
+                Commands::Stop => self.create_cli(),
+                Commands::Start => self.create_daemon(),
+                Commands::Info => self.create_cli(),
+                Commands::GenerateDefaultConfig => self.create_cli(),
+            },
+            None => ,
+        }
     }
 
     fn wait_for_exit(mut self, mut state: Daemon) -> crate::error::Result<()> {
         while let Ok(c) = state.receiver.recv() {
             if c == Action::Stop {
-                state.exit();
                 break;
             }
             state = handle_command(c, &mut self.config, state).expect("failed to handle command");
@@ -43,26 +61,41 @@ impl Context {
         let state = create_state(&self.config)?;
         match state {
             AppState::Daemon(mut daemon) => {
-                println!("starting daemon");
                 setup_sig_handler(daemon.sender.clone())?;
-                daemon.handle_cmd_opt(args.command)?;
+                daemon.handle_cmd_opt(args.command, &self.config)?;
                 self.wait_for_exit(daemon)?;
             }
             AppState::Cli(mut cli) => {
                 println!("sending command to daemon");
-                cli.handle_cmd_opt(args.command)?;
+                cli.handle_cmd_opt(args.command, &self.config)?;
             }
         }
 
         Ok(())
     }
 }
-
+impl CommandHandler for AppState {
+    fn handle_cmd(
+        &mut self,
+        command: Commands,
+        config: &Configuration,
+    ) -> crate::error::Result<()> {
+        match self {
+            AppState::Daemon(daemon) => daemon.handle_cmd(command, config),
+            AppState::Cli(cli) => cli.handle_cmd(command, config),
+        }
+    }
+}
 pub trait CommandHandler {
-    fn handle_cmd(&mut self, command: Commands) -> crate::error::Result<()>;
-    fn handle_cmd_opt(&mut self, command: Option<Commands>) -> crate::error::Result<()> {
+    fn handle_cmd(&mut self, command: Commands, config: &Configuration)
+    -> crate::error::Result<()>;
+    fn handle_cmd_opt(
+        &mut self,
+        command: Option<Commands>,
+        config: &Configuration,
+    ) -> crate::error::Result<()> {
         if let Some(cmd) = command {
-            self.handle_cmd(cmd)?;
+            self.handle_cmd(cmd, config)?;
         }
         Ok(())
     }
@@ -74,11 +107,8 @@ pub struct Daemon {
     receiver: Receiver<Action>,
     config_sender: Sender<Configuration>,
 }
-impl Daemon {
-    fn exit(self) {
-        drop(self)
-    }
 
+impl Daemon {
     fn recreate(mut self, config: &mut Configuration) -> crate::error::Result<Self> {
         if !config.hot_reload {
             self.watcher = None;
@@ -99,27 +129,42 @@ pub struct Cli {
 }
 
 impl CommandHandler for Daemon {
-    fn handle_cmd(&mut self, command: Commands) -> crate::error::Result<()> {
-        self.sender.send(command.to_action())?;
+    fn handle_cmd(
+        &mut self,
+        command: Commands,
+        config: &Configuration,
+    ) -> crate::error::Result<()> {
+        if command == Commands::Info {
+            println!("{config}")
+        } else {
+            self.sender.send(command.to_action())?;
+        }
         Ok(())
     }
 }
 
 impl CommandHandler for Cli {
-    fn handle_cmd(&mut self, command: Commands) -> crate::error::Result<()> {
+    fn handle_cmd(
+        &mut self,
+        command: Commands,
+        config: &Configuration,
+    ) -> crate::error::Result<()> {
         let bincode_config = bincode::config::standard();
         match command {
             Commands::Disable => {
-                bincode::encode_into_std_write(Action::Disable, &mut self.stream, bincode_config)?
+                bincode::encode_into_std_write(Action::Disable, &mut self.stream, bincode_config)?;
             }
             Commands::Enable => {
-                bincode::encode_into_std_write(Action::Enable, &mut self.stream, bincode_config)?
+                bincode::encode_into_std_write(Action::Enable, &mut self.stream, bincode_config)?;
             }
             Commands::Toggle => {
-                bincode::encode_into_std_write(Action::Toggle, &mut self.stream, bincode_config)?
+                bincode::encode_into_std_write(Action::Toggle, &mut self.stream, bincode_config)?;
             }
             Commands::Stop => {
-                bincode::encode_into_std_write(Action::Stop, &mut self.stream, bincode_config)?
+                bincode::encode_into_std_write(Action::Stop, &mut self.stream, bincode_config)?;
+            }
+            Commands::Info => {
+                println!("{config}");
             }
         };
         Ok(())
@@ -128,6 +173,15 @@ impl CommandHandler for Cli {
 pub enum AppState {
     Daemon(Daemon),
     Cli(Cli),
+}
+
+impl AppState {
+    pub fn run(self, context: Context) -> crate::error::Result<()> {
+        match self {
+            AppState::Daemon(daemon) => daemon.run(context),
+            AppState::Cli(cli) => cli.run(contexxt),
+        }
+    }
 }
 
 fn create_state(config: &Configuration) -> crate::error::Result<AppState> {
@@ -161,12 +215,12 @@ fn create_state(config: &Configuration) -> crate::error::Result<AppState> {
 
 fn start_hot_reload(
     config_path: PathBuf,
-    clone: Sender<Action>,
+    sender: Sender<Action>,
 ) -> crate::error::Result<RecommendedWatcher> {
     let mut watcher = recommended_watcher(move |ev: Result<notify::Event, notify::Error>| {
         if let Ok(e) = ev {
             if let Some(_src) = e.source() {
-                clone
+                sender
                     .send(Action::ReloadConfig)
                     .expect("Failed to send hot reload event");
             }
@@ -286,6 +340,7 @@ fn handle_command(
                     .spawn()?;
             }
         }
+        Action::Nothing => {}
     };
     Ok(daemon)
 }
