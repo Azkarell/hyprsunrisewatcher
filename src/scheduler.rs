@@ -1,25 +1,63 @@
+use std::fmt::{Debug, Display};
+
 use chrono::{Days, prelude::*};
 use serde::{Deserialize, Serialize};
 use sunrise::{Coordinates, SolarDay, SolarEvent};
 
-use super::config::{Actions, ManualTimeStamp};
+use crate::{
+    config::{Actions, Configuration, ManualTimeStamp},
+    info::EventInfo,
+};
 
 pub struct Scheduler<T: Trigger> {
     actions: Actions,
     trigger: T,
 }
 
-impl<T: Trigger> EventSource for Scheduler<T> {
-    fn next_event_at(&self, date: DateTime<Utc>) -> Option<(String, DateTime<Utc>)> {
-        let trigger = self.trigger.next_action_at(date);
-        match trigger {
-            Some((trigger, time)) => self.get_action(trigger).map(|action| (action, time)),
-            None => None,
+pub struct TriggerSource {
+    event_source: Box<dyn EventSource>,
+}
+
+impl TriggerSource {
+    pub fn from_config(config: &Configuration) -> crate::error::Result<Self> {
+        if let Some(auto) = &config.automatic {
+            Ok(Self {
+                event_source: Box::new(Scheduler::automatic(
+                    (auto.latitude, auto.longitude),
+                    config.actions.clone(),
+                )),
+            })
+        } else if let Some(manual) = &config.manual {
+            Ok(TriggerSource {
+                event_source: Box::new(Scheduler::manual(
+                    manual.time_stamps.clone(),
+                    config.actions.clone(),
+                )),
+            })
+        } else {
+            Err(crate::error::Error::InvalidConfiguration.into())
         }
     }
 }
+
+impl EventSource for TriggerSource {
+    fn next_event_at(&self, date: DateTime<Utc>) -> Option<EventInfo> {
+        self.event_source.next_event_at(date)
+    }
+}
+
+impl<T: Trigger> EventSource for Scheduler<T> {
+    fn next_event_at(&self, date: DateTime<Utc>) -> Option<EventInfo> {
+        let trigger = self.trigger.next_action_at(date);
+        trigger.map(|(action, at)| EventInfo {
+            at,
+            trigger: action,
+            action: self.get_action(action),
+        })
+    }
+}
 pub trait EventSource {
-    fn next_event_at(&self, date: DateTime<Utc>) -> Option<(String, DateTime<Utc>)>;
+    fn next_event_at(&self, date: DateTime<Utc>) -> Option<EventInfo>;
 }
 
 pub trait Trigger {
@@ -32,6 +70,11 @@ pub enum ActionTrigger {
     Sunset,
     Dusk,
     Dawn,
+}
+impl Display for ActionTrigger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self, f)
+    }
 }
 
 impl ActionTrigger {
@@ -182,7 +225,7 @@ mod test {
     use chrono::{DateTime, Utc};
     use sunrise::Coordinates;
 
-    use crate::abstraction::scheduler::ActionTrigger;
+    use crate::scheduler::ActionTrigger;
 
     use super::Interval;
     fn test_date_sunrise() -> DateTime<Utc> {

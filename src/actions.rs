@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::PathBuf};
+use std::fmt::Display;
 
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,6 @@ pub enum Action {
     ReloadConfig,
     Trigger { action: String },
     Nothing,
-    GenerateDefaultConfig { path: PathBuf },
 }
 
 impl Display for Action {

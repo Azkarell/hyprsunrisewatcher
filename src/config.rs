@@ -19,11 +19,12 @@ pub struct Configuration {
     pub actions: Actions,
     pub hot_reload: bool,
 }
-pub static DEFAULT_PATH: &str = "~/.config/hyprsunrisewatcher/config.toml";
 
 impl Configuration {
-    pub(crate) fn load_default() -> crate::error::Result<Configuration> {
-        Self::load(DEFAULT_PATH)
+    pub const DEFAULT_PATH: &str = "~/.config/hyprsunrisewatcher/config.toml";
+
+    pub fn load_default() -> crate::error::Result<Configuration> {
+        Self::load(Self::DEFAULT_PATH)
     }
 
     pub fn load(path: &str) -> crate::error::Result<Configuration> {
@@ -33,7 +34,7 @@ impl Configuration {
             .merge(Serialized::defaults(Configuration::default()))
             .merge(Toml::file(&*pb));
 
-        let mut config: Configuration = figment.extract()?;
+        let config: Configuration = figment.extract()?;
 
         Ok(config)
     }
@@ -49,7 +50,6 @@ impl Display for Configuration {
 impl Default for Configuration {
     fn default() -> Self {
         Self {
-            config_path: "~/.config/hyprsunrisewatcher/config.toml".into(),
             enabled: true,
             manual: Some(ManualConfig {
                 time_stamps: vec![],
@@ -96,14 +96,11 @@ impl Actions {
     }
 }
 pub fn load_config(path: String) -> crate::error::Result<Configuration> {
-    let pb = shellexpand::full(&path)?;
-
     let figment = Figment::new()
         .merge(Serialized::defaults(Configuration::default()))
-        .merge(Toml::file(&*pb));
+        .merge(Toml::file(&path));
 
-    let mut config: Configuration = figment.extract()?;
+    let config: Configuration = figment.extract()?;
 
-    config.config_path = pb.as_ref().into();
     Ok(config)
 }
