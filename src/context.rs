@@ -27,7 +27,7 @@ impl Context {
         match args.command {
             Some(c) => match c {
                 Commands::Start => self.create_daemon(),
-                Commands::GenerateDefaultConfig => self.create_default_config(),
+                Commands::PrintDefaultConfig => self.create_default_config(),
             },
             None => self.gather_info(),
         }

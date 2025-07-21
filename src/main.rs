@@ -22,7 +22,7 @@ pub struct Args {
 #[derive(Subcommand, Clone, PartialEq, Debug)]
 pub enum Commands {
     Start,
-    GenerateDefaultConfig,
+    PrintDefaultConfig,
 }
 
 fn main() -> crate::error::Result<()> {
