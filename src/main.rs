@@ -9,6 +9,7 @@ pub mod daemon;
 pub mod error;
 pub mod info;
 pub mod scheduler;
+pub mod state;
 
 #[derive(Parser, Clone)]
 #[command(version, about)]

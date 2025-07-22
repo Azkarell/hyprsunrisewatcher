@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Display};
 
-use chrono::{Days, prelude::*};
+use chrono::{Days, TimeDelta, prelude::*};
 use serde::{Deserialize, Serialize};
 use sunrise::{Coordinates, SolarDay, SolarEvent};
 
@@ -39,6 +39,52 @@ impl TriggerSource {
         }
     }
 }
+#[derive(Debug)]
+pub struct EventCache {
+    next_event: Option<EventInfo>,
+    is_triggerd: bool,
+}
+
+impl EventCache {
+    pub fn new() -> Self {
+        Self {
+            next_event: None,
+            is_triggerd: false,
+        }
+    }
+
+    pub fn should_trigger(
+        &mut self,
+        date: DateTime<Utc>,
+        event: Option<EventInfo>,
+    ) -> Option<String> {
+        if self.next_event != event {
+            self.next_event = event;
+            self.is_triggerd = false;
+        }
+        if let Some(ev) = &self.next_event
+            && let Some(action) = &ev.action
+            && !self.is_triggerd
+        {
+            //10:00 - 9:59 => 1m
+            let duration = date - ev.at;
+            if duration >= TimeDelta::zero() && duration < TimeDelta::minutes(1) {
+                self.is_triggerd = true;
+                Some(action.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for EventCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl EventSource for TriggerSource {
     fn next_event_at(&self, date: DateTime<Utc>) -> Option<EventInfo> {
@@ -58,6 +104,11 @@ impl<T: Trigger> EventSource for Scheduler<T> {
 }
 pub trait EventSource {
     fn next_event_at(&self, date: DateTime<Utc>) -> Option<EventInfo>;
+
+    fn should_trigger(&self, date: DateTime<Utc>, cache: &mut EventCache) -> Option<String> {
+        let next = self.next_event_at(date);
+        cache.should_trigger(date, next)
+    }
 }
 
 pub trait Trigger {
@@ -99,11 +150,22 @@ impl Scheduler<LocationInfo> {
 
 impl Trigger for Vec<ManualTimeStamp> {
     fn next_action_at(&self, date: DateTime<Utc>) -> Option<(ActionTrigger, DateTime<Utc>)> {
+        let local_dt = date.with_timezone(&Local);
         let min = self.iter().min_by(move |a, b| {
-            (a.trigger_time - date.naive_local().time())
-                .cmp(&(b.trigger_time - date.naive_local().time()))
+            (a.trigger_time - local_dt.time()).cmp(&(b.trigger_time - local_dt.time()))
         });
-        min.map(|m| (m.action, Utc::now().with_time(m.trigger_time).unwrap()))
+
+        min.map(|m| {
+            let now = Local::now()
+                .with_time(m.trigger_time)
+                .unwrap()
+                .with_timezone(&Utc);
+            if now < date {
+                (m.action, now.checked_add_days(Days::new(1)).unwrap())
+            } else {
+                (m.action, now)
+            }
+        })
     }
 }
 impl Scheduler<Vec<ManualTimeStamp>> {

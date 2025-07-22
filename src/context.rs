@@ -1,12 +1,8 @@
-use crate::{
-    Args, Commands,
-    daemon::{AppState, Daemon},
-    info::InfoGatherer,
-};
+use crate::{Args, Commands, daemon::Daemon, info::InfoGatherer, state::AppState};
 use chrono::Utc;
 
 use crate::{
-    config::{Configuration, SOCKET_NAME, load_config},
+    config::Configuration,
     scheduler::{EventSource, TriggerSource},
 };
 
@@ -23,6 +19,16 @@ impl Context {
         }
     }
 
+    pub fn run(self, args: Args) -> Result<(), Box<dyn std::error::Error + 'static>> {
+        let state = self.create_execution_state(args)?;
+        state.run(self)
+    }
+
+    fn gather_info(&self) -> crate::error::Result<AppState> {
+        let ts = TriggerSource::from_config(&self.config)?;
+        let next_event_at = ts.next_event_at(Utc::now());
+        Ok(AppState::Info(InfoGatherer::new(next_event_at)))
+    }
     fn create_execution_state(&self, args: Args) -> crate::error::Result<AppState> {
         match args.command {
             Some(c) => match c {
@@ -38,16 +44,5 @@ impl Context {
 
     fn create_daemon(&self) -> crate::error::Result<AppState> {
         Ok(AppState::Daemon(Daemon::create(self)?))
-    }
-
-    pub fn run(self, args: Args) -> Result<(), Box<dyn std::error::Error + 'static>> {
-        let state = self.create_execution_state(args)?;
-        state.run(self)
-    }
-
-    fn gather_info(&self) -> crate::error::Result<AppState> {
-        let ts = TriggerSource::from_config(&self.config)?;
-        let next_event_at = ts.next_event_at(Utc::now());
-        Ok(AppState::Info(InfoGatherer::new(next_event_at)))
     }
 }

@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::{config::Configuration, context::Context, scheduler::ActionTrigger};
 
-#[derive(Serialize)]
+#[derive(Serialize, PartialEq, Eq, Debug)]
 pub struct EventInfo {
     pub at: DateTime<Utc>,
     pub trigger: ActionTrigger,

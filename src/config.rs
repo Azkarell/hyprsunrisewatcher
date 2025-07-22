@@ -1,4 +1,4 @@
-use std::{fmt::Display, fs::canonicalize, path::PathBuf, str::FromStr};
+use std::fmt::Display;
 
 use chrono::NaiveTime;
 use figment::{
@@ -28,11 +28,9 @@ impl Configuration {
     }
 
     pub fn load(path: &str) -> crate::error::Result<Configuration> {
-        let pb = shellexpand::full(path)?;
-
         let figment = Figment::new()
             .merge(Serialized::defaults(Configuration::default()))
-            .merge(Toml::file(&*pb));
+            .merge(Toml::file(&path));
 
         let config: Configuration = figment.extract()?;
 
@@ -94,13 +92,4 @@ impl Actions {
             ActionTrigger::Dawn => self.on_dawn.clone(),
         }
     }
-}
-pub fn load_config(path: String) -> crate::error::Result<Configuration> {
-    let figment = Figment::new()
-        .merge(Serialized::defaults(Configuration::default()))
-        .merge(Toml::file(&path));
-
-    let config: Configuration = figment.extract()?;
-
-    Ok(config)
 }

@@ -1,5 +1,4 @@
 use std::{
-    fmt::Display,
     io::{self, BufReader},
     path::PathBuf,
     sync::mpsc::{Receiver, Sender, channel},
@@ -7,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{Args, Commands, context::Context, info::InfoGatherer};
+use crate::{context::Context, scheduler::EventCache};
 use chrono::{TimeDelta, Utc};
 use interprocess::local_socket::{
     GenericNamespaced, Listener, ListenerOptions, Stream, ToNsName, traits::ListenerExt,
@@ -16,36 +15,9 @@ use notify::{INotifyWatcher, RecommendedWatcher, Watcher, recommended_watcher};
 
 use crate::{
     actions::Action,
-    config::{Configuration, SOCKET_NAME, load_config},
+    config::{Configuration, SOCKET_NAME},
     scheduler::{EventSource, TriggerSource},
 };
-
-//impl CommandHandler for AppState {
-//    fn handle_cmd(
-//        &mut self,
-//        command: Commands,
-//        config: &Configuration,
-//    ) -> crate::error::Result<()> {
-//        match self {
-//            AppState::Daemon(daemon) => daemon.handle_cmd(command, config),
-//            AppState::Cli(cli) => cli.handle_cmd(command, config),
-//        }
-//    }
-//}
-// pub trait CommandHandler {
-//     fn handle_cmd(&mut self, command: Commands, config: &Configuration)
-//     -> crate::error::Result<()>;
-//     fn handle_cmd_opt(
-//         &mut self,
-//         command: Option<Commands>,
-//         config: &Configuration,
-//     ) -> crate::error::Result<()> {
-//         if let Some(cmd) = command {
-//             self.handle_cmd(cmd, config)?;
-//         }
-//         Ok(())
-//     }
-// }
 
 pub struct Daemon {
     pub watcher: Option<INotifyWatcher>,
@@ -62,7 +34,7 @@ impl Daemon {
     ) -> crate::error::Result<Self> {
         if !config.hot_reload {
             self.watcher = None;
-        } else if config.hot_reload && self.watcher.is_none() {
+        } else {
             self.watcher = Some(start_hot_reload(config_path, self.sender.clone())?);
         }
         self.config_sender.send(config.clone())?;
@@ -70,13 +42,12 @@ impl Daemon {
         Ok(self)
     }
 
-    fn run(mut self, mut context: Context) -> crate::error::Result<()> {
+    pub fn run(mut self, mut context: Context) -> crate::error::Result<()> {
         while let Ok(c) = self.receiver.recv() {
             if c == Action::Stop {
                 break;
             }
-            self = handle_command(c, &mut context.config, self, context.config_path.clone())
-                .expect("failed to handle command");
+            self = handle_command(c, &mut context.config, self, &context.config_path)?;
         }
         Ok(())
     }
@@ -111,109 +82,16 @@ impl Daemon {
     }
 }
 
-//pub struct Cli {
-//    stream: Stream,
-//}
-//
-//impl CommandHandler for Daemon {
-//    fn handle_cmd(
-//        &mut self,
-//        command: Commands,
-//        config: &Configuration,
-//    ) -> crate::error::Result<()> {
-//        Ok(())
-//    }
-//}
-
-//impl CommandHandler for Cli {
-//    fn handle_cmd(
-//        &mut self,
-//        command: Commands,
-//        config: &Configuration,
-//    ) -> crate::error::Result<()> {
-//        let bincode_config = bincode::config::standard();
-//        match command {
-//            Commands::Disable => {
-//                bincode::encode_into_std_write(Action::Disable, &mut self.stream, bincode_config)?;
-//            }
-//            Commands::Enable => {
-//                bincode::encode_into_std_write(Action::Enable, &mut self.stream, bincode_config)?;
-//            }
-//            Commands::Toggle => {
-//                bincode::encode_into_std_write(Action::Toggle, &mut self.stream, bincode_config)?;
-//            }
-//            Commands::Stop => {
-//                bincode::encode_into_std_write(Action::Stop, &mut self.stream, bincode_config)?;
-//            }
-//            Commands::Info => {
-//                println!("{config}");
-//            }
-//        };
-//        Ok(())
-//    }
-//}
-pub enum AppState {
-    Daemon(Daemon),
-    Info(InfoGatherer),
-    DefaultConfig,
-}
-
-impl AppState {
-    pub fn run(self, context: Context) -> crate::error::Result<()> {
-        match self {
-            AppState::Daemon(daemon) => daemon.run(context)?,
-            AppState::Info(info) => info.print(context)?,
-            AppState::DefaultConfig => {
-                println!(
-                    "{}",
-                    toml_edit::ser::to_string_pretty(&Configuration::default())?
-                )
-            }
-        }
-
-        Ok(())
-    }
-}
-
-//fn create_state(config: &Configuration) -> crate::error::Result<AppState> {
-//    let (sender, receiver) = channel();
-//    let (sender_config, receiver_config) = channel();
-//    let name = SOCKET_NAME.to_ns_name::<GenericNamespaced>()?;
-//    let opts = ListenerOptions::new().name(name.clone());
-//    if let Ok(listener) = opts.create_sync() {
-//        let sc = sender.clone();
-//        std::thread::spawn(move || start_translate_events(sc, listener));
-//        let _trigger_thread = setup_trigger(sender.clone(), receiver_config)?;
-//        sender_config.send(config.clone())?;
-//        let mut watcher = None;
-//        if config.hot_reload {
-//            watcher = Some(start_hot_reload(
-//                config.config_path.clone(),
-//                sender.clone(),
-//            )?);
-//        }
-//        Ok(AppState::Daemon(Daemon {
-//            watcher,
-//            sender,
-//            receiver,
-//            config_sender: sender_config,
-//        }))
-//    } else {
-//        let stream = <Stream as interprocess::local_socket::traits::Stream>::connect(name)?;
-//        Ok(AppState::Cli(Cli { stream }))
-//    }
-//}
-
 fn start_hot_reload(
     config_path: PathBuf,
     sender: Sender<Action>,
 ) -> crate::error::Result<RecommendedWatcher> {
     let mut watcher = recommended_watcher(move |ev: Result<notify::Event, notify::Error>| {
         if let Ok(e) = ev {
-            if let Some(_src) = e.source() {
+            if let notify::EventKind::Modify(_) = e.kind {
                 sender
                     .send(Action::ReloadConfig)
-                    .expect("Failed to send hot reload event");
+                    .expect("failed to send hot reload event");
             }
         }
     })?;
@@ -226,6 +104,7 @@ fn run_trigger_thread(
     receiver: Receiver<Configuration>,
 ) -> crate::error::Result<()> {
     let mut scheduler = None;
+    let mut cache = EventCache::new();
     loop {
         match receiver.try_recv() {
             Ok(config) => scheduler = Some(TriggerSource::from_config(&config)?),
@@ -236,16 +115,10 @@ fn run_trigger_thread(
         }
         if let Some(source) = &mut scheduler {
             let now = Utc::now();
-            if let Some(ev) = source.next_event_at(now) {
-                if let Some(action) = ev.action {
-                    let duration = ev.at - now;
-                    if duration.abs() > TimeDelta::seconds(30) {
-                        sleep(Duration::from_secs(10));
-                    }
-                    if duration.abs() < TimeDelta::seconds(10) {
-                        sender.send(Action::Trigger { action })?;
-                    }
-                }
+            if let Some(action) = source.should_trigger(now, &mut cache) {
+                sender.send(Action::Trigger { action })?;
+            } else {
+                sleep(Duration::from_secs(25))
             }
         }
     }
@@ -295,9 +168,8 @@ fn handle_command(
     command: Action,
     config: &mut Configuration,
     mut daemon: Daemon,
-    config_path: String,
+    config_path: &str,
 ) -> crate::error::Result<Daemon> {
-    println!("handling : {command}");
     match command {
         Action::Stop => {
             unreachable!("this should never happen!")
@@ -306,8 +178,18 @@ fn handle_command(
         Action::Disable => config.enabled = false,
         Action::Toggle => config.enabled = !config.enabled,
         Action::ReloadConfig => {
-            println!("Reloading");
-            *config = load_config(config_path.clone())?;
+            if std::fs::OpenOptions::new()
+                .write(false)
+                .read(true)
+                .open(config_path)
+                .is_err()
+            {
+                sleep(Duration::from_millis(100));
+                daemon.sender.send(Action::ReloadConfig)?;
+                return Ok(daemon);
+            }
+
+            *config = Configuration::load(config_path)?;
             daemon = daemon.recreate(config, config_path.into())?;
         }
         Action::Trigger { action } => {
